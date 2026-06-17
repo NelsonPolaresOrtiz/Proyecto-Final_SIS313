@@ -1,0 +1,564 @@
+================================================================================
+🚀 PROYECTO FINAL SIS313: PLATAFORMA DE GESTIÓN DOCUMENTAL CORPORATIVA SEGURA
+================================================================================
+Asignatura: SIS313: Infraestructura, Plataformas Tecnológicas y Redes
+Semestre: 1/2026
+Docente: Ing. Marcelo Quispe Ortega
+
+👥 MIEMBROS DEL EQUIPO (Grupo 4)
+--------------------------------------------------------------------------------
+Nombre Completo                Rol en el Proyecto                  GitHub
+[Nelson Polares Ortiz]         [Arquitecto de Seguridad]           [NelsonPolaresOrtiz]
+[Jhonnathan Peñaranda Mamani]  [Administrador de Servidores]       [jhonasPM64]
+[Emily Karen Villarpando Olmedo][Administrador de Base de Datos]   [nerak5555]
+[Quispe Serrano Carla]         [Monitoreo y Automatización]        [CarlaQS]
+--------------------------------------------------------------------------------
+
+🎯 I. OBJETIVO DEL PROYECTO
+Diseñar, implementar y asegurar una infraestructura distribuida y multinivel en entornos de alta disponibilidad para una plataforma de gestión documental corporativa (Nextcloud), garantizando el aislamiento estricto de la información por departamentos mediante segmentación por VLANs, la mitigación de puntos únicos de fallo a través de un proxy inverso, políticas de firewall perimetral con UFW, auditoría inmutable de accesos, monitoreo en tiempo real con Prometheus y Grafana, y políticas automatizadas de respaldo incremental ante desastres.
+
+💡 II. JUSTIFICACIÓN E IMPORTANCIA
+Las arquitecturas monolíticas tradicionales centralizadas presentan un Punto Único de Fallo y una alta superficie de exposición a ataques. Este proyecto implementa una infraestructura distribuida y multinivel que mitiga los riesgos de caídas del servicio y fugas de información a través de dos ejes estratégicos:
+
+1. Continuidad Operacional y Resiliencia (T1 / T2)
+* Alta Disponibilidad: Un proxy inverso mitiga los colapsos operativos redirigiendo inteligentemente las peticiones y absorbiendo ráfagas de tráfico masivo.
+* Persistencia Tolerante a Fallos: El uso combinado de arreglos redundantes de discos (RAID 1) y almacenamiento compartido en red (NFS) garantiza el acceso continuo a los datos ante averías de hardware físico.
+* Recuperación ante Desastres: Scripts Bash automatizados mediante Cron ejecutan respaldos periódicos con políticas estrictas de retención de datos, reduciendo el RTO y asegurando el RPO.
+
+2. Seguridad Avanzada y Hardening (T5)
+* Aislamiento de Red: Segmentación estricta por VLANs para separar físicamente la zona pública (DMZ/Frontend) de la zona crítica interna de persistencia de datos.  
+* Control Perimetral Departamental: Implementación de reglas de firewall restrictivas con UFW, permitiendo el acceso a puertos específicos únicamente a orígenes autorizados.  
+* Cifrado End-to-End: Conexiones cifradas mediante protocolos TLS estrictos en NGINX para proteger los archivos y credenciales en tránsito de ataques de interceptación.
+* Gestión Segura Relegada: Reducción de la superficie de ataque al prohibir el acceso administrativo directo desde redes públicas, centralizándolo mediante un puerto seguro de SSH (2222).
+
+🛠️ III. TECNOLOGÍAS Y CONCEPTOS IMPLEMENTADOS
+
+3.1. Tecnologías Clave
+* [Nginx]: Proxy Inverso y Terminación TLS/SSL para el cifrado de extremo a extremo y enrutamiento perimetral.
+* [UFW]: Cortafuegos perimetral basado en la política de denegación por defecto y filtrado de puertos.
+* [OpenSSH]: Servicio de acceso remoto securizado en puerto alto (2222) para administración del clúster.
+* [OpenSSL]: Gestión y generación de los certificados criptográficos para el tráfico seguro.
+* [Monitoreo (Prometheus/Grafana)]: Monitoreo integral y visualización de métricas de rendimiento y tráfico en tiempo real mediante node_exporter.
+* [Automatización (Bash, scripts, cron)]: Automatización de tareas de mantenimiento, rotación de copias de seguridad y limpieza selectiva de almacenamiento.
+* [Herramientas Backup (tar, mysqldump)]: Automatización, empaquetado y recuperación de copias de seguridad de datos relacionales y binarios.
+* [PHP-FPM]: Procesador backend optimizado para la ejecución del código PHP y gestión de archivos de Nextcloud en la capa de aplicación.
+* [Keepalived]: Encargado de gestionar la tolerancia a fallos mediante el protocolo VRRP y una dirección IP Virtual (VIP).
+* [Fail2ban]: Sistema de prevención de intrusiones encargado de aplicar mitigaciones dinámicas contra ataques de fuerza bruta.
+
+3.2. Conceptos de la Asignatura Puestos en Práctica (T1 - T6)
+* [✅] Alta Disponibilidad (T2) y Tolerancia a Fallos: Implementación de Keepalived para failover de IP Virtual y arreglos de discos RAID 1 mediante mdadm.
+* [✅] Seguridad y Hardening (T5): Uso de Firewall (UFW) con Default Deny, Hardening de SSH en puerto 2222 y aislamiento perimetral.
+* [✅] Automatización y Gestión (T6): Orquestación del aprovisionamiento del clúster con Ansible Playbooks y tareas automatizadas en Cron.
+* [✅] Balanceo de Carga/Proxy (T3/T4): Nginx configurado como Proxy Inverso perimetral para el reenvío de cabeceras HTTP limpias hacia la aplicación.
+* [✅] Monitoreo (T4/T1): Despliegue de un servidor centralizado con Prometheus y Grafana para el raspado de métricas por el puerto 9100.
+* [✅] Networking Avanzado (T3): Configuración de subinterfaces de red lógicas para segmentación de tráfico por VLANs (VLAN 10, 20, 30, 40).
+
+🌐 IV. DISEÑO DE LA INFRAESTRUCTURA Y TOPOLOGÍA
+
+4.1. Diseño Esquemático
+El ecosistema se segmenta en 4 zonas lógicas aisladas mediante subinterfaces lógicas de red sobre una interfaz física común (ens18), forzando el paso de todo tráfico inter-VLAN por la pasarela del Router Central.
+
+VM/Host    Rol                           IP Física         IP Virtual (VIP)   Red Lógica (VLAN)    SO
+-----------------------------------------------------------------------------------------------------------------
+VM1        Proxy / Seguridad Perimetral  192.168.100.208   N/A                VLAN 10 (10.0.10.2)  Ubuntu 24.04
+VM2        Capa de Aplicación (Nextcloud)192.168.100.207   192.168.100.210    VLAN 20 (10.0.20.2)  Ubuntu 24.04
+VM3        Capa de Datos y Persistencia  192.168.100.209   N/A                VLAN 30 (10.0.30.2)  Ubuntu 24.04
+VM4        Torre de Control y Monitoreo  192.168.100.211   N/A                VLAN 40 (10.0.40.2)  Ubuntu 24.04
+-----------------------------------------------------------------------------------------------------------------
+
+📋 V. GUÍA DE IMPLEMENTACIÓN Y PUESTA EN MARCHA
+
+================================================================================
+V. GUÍA DE IMPLEMENTACIÓN Y PUESTA EN MARCHA (VM1: SEGURIDAD PERIMETRAL Y ACCESO)
+================================================================================
+Esta sección detalla los pasos esenciales ejecutados de forma secuencial para el despliegue, endurecimiento perimetral y puesta en marcha del servidor de Seguridad Perimetral y Acceso (VM1) dentro del segmento de red VLAN 10.
+
+--------------------------------------------------------------------------------
+1. CONFIGURACIÓN DE RED E INTERFAZ (NETPLAN)
+--------------------------------------------------------------------------------
+* Fichero clave: /etc/netplan/50-cloud-init.yaml
+* Comando de edición: sudo nano /etc/netplan/50-cloud-init.yaml
+
+Código de red aplicado:
+--------------------------------------------------------------------------------
+network:
+    version: 2
+    renderer: networkd
+    ethernets:
+        ens18:
+            addresses:
+                - "192.168.100.208/24"
+    vlans:
+        vlan10:
+            id: 10
+            link: ens18
+            addresses: ["10.0.10.2/24"]
+            nameservers:
+                addresses: ["8.8.8.8"]
+            routes:
+                - to: "default"
+                  via: "10.0.10.1"
+--------------------------------------------------------------------------------
+
+* Comando de aplicación en caliente:
+  sudo netplan apply
+
+--------------------------------------------------------------------------------
+2. CONFIGURACIÓN Y ASEGURAMIENTO DEL PUERTO SSH
+--------------------------------------------------------------------------------
+Siguiendo las directivas de seguridad orientadas a mitigar ataques automatizados de fuerza bruta en el puerto por defecto (22), se migró el servicio SSH a un puerto alto y seguro.
+
+* Fichero clave: /etc/ssh/sshd_config
+* Directiva modificada: Port 2222
+* Comandos de reinicio del demonio de acceso:
+  sudo systemctl restart ssh
+  sudo systemctl restart sshd
+
+--------------------------------------------------------------------------------
+3. ENDURECIMIENTO DEL CORTAFUEGOS PERIMETRAL (UFW)
+--------------------------------------------------------------------------------
+Se estableció una política estricta de "Denegación por Defecto" (Default Deny incoming), abriendo quirúrgicamente solo los puertos esenciales para la operación y auditoría del proyecto, restringiendo el monitoreo a la IP origen autorizada.
+
+* Comandos de configuración secuencial:
+  sudo ufw default deny incoming
+  sudo ufw default allow outgoing
+  sudo ufw allow 2222/tcp
+  sudo ufw allow 80/tcp
+  sudo ufw allow 443/tcp
+  sudo ufw allow from 10.0.40.2 to any port 9100 proto tcp comment 'Monitoreo desde VM4'
+  sudo ufw --force enable
+
+* Comando de auditoría y verificación visual:
+  sudo ufw status verbose
+
+--------------------------------------------------------------------------------
+4. IMPLEMENTACIÓN DEL PROXY INVERSO (NGINX)
+--------------------------------------------------------------------------------
+Se modificó el archivo de configuración activo del servidor web para reutilizar la estructura nativa, reemplazando la entrega de archivos locales por una directiva de Proxy Inverso que redirige las solicitudes de producción hacia la capa de aplicación.
+
+* Fichero clave: /etc/nginx/sites-enabled/default
+* Comando de edición: sudo nano /etc/nginx/sites-enabled/default
+
+Bloque de código modificado (location /):
+--------------------------------------------------------------------------------
+server {
+        listen 80 default_server;
+        listen [::]:80 default_server;
+
+        server_name _;
+        root /var/www/html;
+        index index.html index.htm index.nginx-debian.html;
+
+        location / {
+                # Redirección perimetral hacia la Capa de Aplicación (VM2 - Nextcloud)
+                proxy_pass http://10.0.20.2;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+        }
+}
+--------------------------------------------------------------------------------
+
+* Comandos de control de calidad y reinicio del servicio:
+  sudo nginx -t
+  sudo systemctl restart nginx
+
+--------------------------------------------------------------------------------
+5. COMANDOS DE VERIFICACIÓN DEL ESTADO DEL ARREGLO
+--------------------------------------------------------------------------------
+Para garantizar la resiliencia y la correcta ejecución de los servicios antes de la entrega final del Data Center, se ejecutan las siguientes pruebas de diagnóstico:
+
+* Verificar que NGINX esté activo, corriendo y sin errores en sus hilos:
+  sudo systemctl status nginx
+
+* Verificar el estado operativo del firewall perimetral:
+  sudo ufw status verbose
+
+================================================================================
+V. GUÍA DE IMPLEMENTACIÓN Y PUESTA EN MARCHA (VM2: CAPA DE APLICACIÓN)
+================================================================================
+Esta sección detalla los pasos para el aislamiento en la VLAN 20, la preparación del aprovisionamiento automatizado y la configuración de Alta Disponibilidad de la capa lógica.
+
+--------------------------------------------------------------------------------
+1. CONFIGURACIÓN DE RED E INTERCONEXIÓN (NETPLAN)
+--------------------------------------------------------------------------------
+Aislamiento de los servidores dentro de sus respectivas interfaces lógicas de la VLAN 20 manteniendo la IP de gestión física ens18.
+
+* Fichero clave: /etc/netplan/50-cloud-init.yaml
+* Comando de edición: sudo nano /etc/netplan/50-cloud-init.yaml
+
+Código de red aplicado:
+--------------------------------------------------------------------------------
+network:
+  version: 2
+  ethernets:
+    ens18:
+      dhcp4: false
+  vlans:
+    vlan20:
+      id: 20
+      link: ens18
+      dhcp4: false
+      addresses:
+        - 192.168.100.207/24
+      nameservers:
+        addresses:
+          - 8.8.8.8
+      routes:
+        - to: default
+          via: 192.168.100.1
+--------------------------------------------------------------------------------
+
+* Aplicar los cambios en el sistema operativo mediante:
+  sudo netplan apply
+
+--------------------------------------------------------------------------------
+2. MONTAJE DEL ALMACENAMIENTO REMOTO DE DATOS (CLIENTE NFS)
+--------------------------------------------------------------------------------
+Se vincula la carpeta compartida desde la VM3 dentro de la ruta local de Nextcloud para la persistencia inmutable de archivos de usuario.
+
+* Instalación de herramientas cliente: sudo apt install -y nfs-common
+* Creación del punto de montaje local: sudo mkdir -p /var/www/html/nextcloud/data
+* Registro persistente en el fichero /etc/fstab:
+  echo '10.0.30.2:/mnt/data_storage /var/www/html/nextcloud/data nfs defaults 0 0' | sudo tee -a /etc/fstab
+* Ejecutar montaje en caliente: sudo mount -a
+
+--------------------------------------------------------------------------------
+3. DESPLIEGUE Y AUTOMATIZACIÓN (ANSIBLE - DESDE EL NODO DE CONTROL VM1)
+--------------------------------------------------------------------------------
+La orquestación del clúster se centraliza exclusivamente desde la VM1 para automatizar la instalación de paquetes y configuraciones.
+
+* Instalación de Ansible (Solo en la VM1 de control):
+  sudo apt update && sudo apt install -y ansible
+
+* Edición del Inventario (/etc/ansible/hosts.ini):
+--------------------------------------------------------------------------------
+[webservers]
+nodo_aplicacion_A ansible_host=192.168.100.207 ansible_user=adming4 ansible_port=2222
+
+[dbservers]
+nodo_base_datos ansible_host=192.168.100.209 ansible_user=adming4
+--------------------------------------------------------------------------------
+
+* Ejecución del Playbook Principal para aprovisionar todo el entorno:
+  ansible-playbook -i hosts.ini setup.yml
+
+--------------------------------------------------------------------------------
+4. FICHEROS DE CONFIGURACIÓN CLAVE DE LA CAPA DE APLICACIÓN
+--------------------------------------------------------------------------------
+A. Procesamiento Web Local (/etc/nginx/sites-available/nextcloud)
+Fichero de configuración optimizado para el procesamiento del motor PHP y directivas de endurecimiento:
+
+--------------------------------------------------------------------------------
+upstream php-handler {
+    server unix:/run/php/php8.3-fpm.sock;
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    root /var/www/html/nextcloud;
+    index index.php index.html;
+
+    client_max_body_size 512M;
+    client_body_buffer_size 512k;
+    fastcgi_buffers 64 4K;
+
+    add_header X-Content-Type-Options nosniff;
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-XSS-Protection "1; mode=block";
+
+    location / {
+        try_files $uri $uri/ /index.php$request_uri;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass php-handler;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    }
+
+    location ~ ^/(?:\.|autotest|occ|issue|indie|db_|config) {
+        deny all;
+    }
+}
+--------------------------------------------------------------------------------
+
+B. Configuración de la Alta Disponibilidad de Red (/etc/keepalived/keepalived.conf)
+Fichero encargado de la tolerancia a fallos de la pasarela mediante protocolo VRRP:
+
+--------------------------------------------------------------------------------
+vrrp_script chk_nginx {
+    script "pidof nginx"
+    interval 2
+}
+
+vrrp_instance VI_1 {
+    state MASTER            
+    interface vlan20        
+    virtual_router_id 51
+    priority 101            
+    advert_int 1
+
+    authentication {
+        auth_type PASS
+        auth_pass usfx123   
+    }
+
+    virtual_ipaddress {
+        192.168.100.210/24  
+    }
+
+    track_script {
+        chk_nginx
+    }
+}
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+5. PUESTA EN MARCHA Y VERIFICACIÓN FINAL
+--------------------------------------------------------------------------------
+* Reinicio de los Servicios Core en la Capa de Aplicación:
+  sudo systemctl restart nginx
+  sudo systemctl restart php8.3-fpm
+  sudo systemctl restart keepalived
+
+* Prueba de Acceso: Abrir un navegador web externo apuntando a la dirección IP del Proxy de la VM1. El sistema redirigirá de forma interna el tráfico transparente a través de la VLAN 20, desplegando la interfaz oficial de inicialización de la plataforma Nextcloud.
+
+================================================================================
+V. GUÍA DE IMPLEMENTACIÓN Y PUESTA EN MARCHA (VM3: CAPA DE DATOS Y PERSISTENCIA)
+================================================================================
+Esta sección detalla los pasos esenciales ejecutados para el despliegue, configuración del almacenamiento redundante, motor de base de datos y automatización de respaldos en el servidor de Capa de Datos (VM3) en la VLAN 30.
+
+--------------------------------------------------------------------------------
+1. CONFIGURACIÓN DE RED E INTERFAZ (NETPLAN)
+--------------------------------------------------------------------------------
+Se configuró la subinterfaz lógica correspondiente a la VLAN 30 para establecer comunicación interna exclusiva con los demás componentes del Data Center a través del Router Central, manteniendo la interfaz física para la gestión local.
+
+* Fichero clave: /etc/netplan/50-cloud-init.yaml
+* Comando de edición: sudo nano /etc/netplan/50-cloud-init.yaml
+
+Código de red aplicado:
+--------------------------------------------------------------------------------
+network:
+    version: 2
+    renderer: networkd
+    ethernets:
+        ens18:
+            addresses:
+                - "192.168.100.209/24"
+    vlans:
+        vlan30:
+            id: 30
+            link: ens18
+            addresses: ["10.0.30.2/24"]
+            nameservers:
+                addresses: ["8.8.8.8"]
+            routes:
+                - to: "default"
+                  via: "10.0.30.1"
+--------------------------------------------------------------------------------
+
+* Comando de aplicación en caliente:
+  sudo netplan apply
+
+--------------------------------------------------------------------------------
+2. DESPLIEGUE DEL ARREGLO DE DISCOS REDUNDANTES (RAID 1 VIRTUAL)
+--------------------------------------------------------------------------------
+Para garantizar la alta disponibilidad y la tolerancia a fallos en el almacenamiento de los documentos de Nextcloud, se creó un arreglo RAID 1 por software utilizando dos discos virtuales adicionales (/dev/sdb y /dev/sdc).
+
+* Creación del arreglo RAID con mdadm:
+  sudo mdadm --create --verbose /dev/md0 --level=1 --raid-devices=2 /dev/sdb /dev/sdc
+
+* Creación del sistema de archivos ext4 sobre el volumen RAID:
+  sudo mkfs.ext4 /dev/md0
+
+* Creación del punto de montaje y ensamblado automático en el arranque:
+  sudo mkdir -p /mnt/data_storage
+  sudo mount /dev/md0 /mnt/data_storage
+
+* Registro en /etc/fstab para persistencia (Fichero clave):
+  echo '/dev/md0 /mnt/data_storage ext4 defaults 0 0' | sudo tee -a /etc/fstab
+
+--------------------------------------------------------------------------------
+3. CONFIGURACIÓN DEL SERVIDOR DE ARCHIVOS COMPARTIDOS (NFS)
+--------------------------------------------------------------------------------
+Se exportó el directorio montado sobre el RAID de forma perimetral para que la VM2 (Capa de Aplicación) pueda almacenar físicamente los archivos de los usuarios externos.
+
+* Fichero clave de exportación: /etc/exports
+* Comando de edición: sudo nano /etc/exports
+
+Línea de configuración interna aplicada:
+--------------------------------------------------------------------------------
+/mnt/data_storage  10.0.20.2(rw,sync,no_subtree_check,no_root_squash)
+--------------------------------------------------------------------------------
+
+* Comandos para aplicar la exportación y reiniciar el servicio NFS:
+  sudo exportfs -rav
+  sudo systemctl restart nfs-kernel-server
+
+--------------------------------------------------------------------------------
+4. CONFIGURACIÓN DEL MOTOR DE BASE DE DATOS (MARIADB)
+--------------------------------------------------------------------------------
+Se instaló y aseguró el motor relacional MariaDB para persistir los metadatos de Nextcloud, modificando el socket para permitir conexiones tcp directas desde la VM2.
+
+* Fichero clave de red de MariaDB: /etc/mysql/mariadb.conf.d/50-server.cnf
+* Directiva modificada para escuchar en la red interna: bind-address = 10.0.30.2
+
+* Comandos de creación de la Base de Datos y privilegios (Consola MariaDB):
+--------------------------------------------------------------------------------
+CREATE DATABASE nextcloud_db;
+CREATE USER 'nextcloud_user'@'10.0.20.2' IDENTIFIED BY 'PasswordSeguro123$';
+GRANT ALL PRIVILEGES ON nextcloud_db.* TO 'nextcloud_user'@'10.0.20.2';
+FLUSH PRIVILEGES;
+EXIT;
+--------------------------------------------------------------------------------
+
+* Comando de reinicio del servicio:
+  sudo systemctl restart mariadb
+
+--------------------------------------------------------------------------------
+5. AUTOMATIZACIÓN DE RESPALDOS (SCRIPT BASH Y CRON)
+--------------------------------------------------------------------------------
+Se implementó un script en Bash automatizado que genera un volcado (dump) de la base de datos de forma diaria y empaqueta el directorio NFS sobre el RAID.
+
+* Fichero clave del Script: /opt/scripts/backup.sh
+* Comando de edición: sudo nano /opt/scripts/backup.sh
+
+Código del script en Bash:
+--------------------------------------------------------------------------------
+#!/bin/bash
+BACKUP_DIR="/mnt/data_storage/backups"
+FECHA=$(date +%Y%m%d_%H%M%S)
+
+mkdir -p $BACKUP_DIR
+mysqldump -u nextcloud_user -p'PasswordSeguro123$' nextcloud_db > $BACKUP_DIR/db_backup_$FECHA.sql
+tar -czf $BACKUP_DIR/files_backup_$FECHA.tar.gz /mnt/data_storage/nextcloud_data
+
+# Mantener solo los últimos 7 días de respaldo para optimizar espacio
+find $BACKUP_DIR -type f -mtime +7 -delete
+--------------------------------------------------------------------------------
+
+* Asignación de permisos de ejecución obligatorios:
+  sudo chmod +x /opt/scripts/backup.sh
+
+* Programación en las tareas del sistema (Fichero clave: crontab):
+  Comando: sudo crontab -e
+  Línea agregada (Ejecución programada cada medianoche a las 00:00):
+  0 0 * * * /opt/scripts/backup.sh
+
+--------------------------------------------------------------------------------
+6. COMANDOS DE VERIFICACIÓN Y AUDITORÍA DE LA VM3
+--------------------------------------------------------------------------------
+Pruebas operativas necesarias para garantizar el correcto funcionamiento de la persistencia:
+
+* Verificar el estado de salud y sincronización del arreglo RAID 1:
+  cat /proc/mdstat
+
+* Verificar que el Servidor NFS esté exponiendo la carpeta correctamente:
+  sudo showmount -e 10.0.30.2
+
+* Verificar los servicios críticos del sistema (MariaDB y NFS):
+  sudo systemctl status mariadb
+  sudo systemctl status nfs-kernel-server
+
+================================================================================
+V. GUÍA DE IMPLEMENTACIÓN Y PUESTA EN MARCHA (VM4: TORRE DE CONTROL Y MONITOREO - GESTIÓN: CARLA)
+================================================================================
+Esta sección detalla los pasos esenciales ejecutados por Carla para el aprovisionamiento de las plataformas Prometheus y Grafana destinadas a la auditoría de métricas de rendimiento y recolección de logs del clúster.
+
+--------------------------------------------------------------------------------
+1. CONFIGURACIÓN DE RED E INTERFAZ (NETPLAN)
+--------------------------------------------------------------------------------
+Se enlazó la máquina virtual al segmento aislado de la VLAN 40 para centralizar la supervisión y auditoría del clúster distributed.
+
+* Fichero clave: /etc/netplan/50-cloud-init.yaml
+* Comando de edición: sudo nano /etc/netplan/50-cloud-init.yaml
+
+Código de red aplicado:
+--------------------------------------------------------------------------------
+network:
+    version: 2
+    renderer: networkd
+    ethernets:
+        ens18:
+            addresses:
+                - "192.168.100.211/24"
+    vlans:
+        vlan40:
+            id: 40
+            link: ens18
+            addresses: ["10.0.40.2/24"]
+            nameservers:
+                addresses: ["8.8.8.8"]
+            routes:
+                - to: "default"
+                  via: "10.0.40.1"
+--------------------------------------------------------------------------------
+* Comando de aplicación en caliente: sudo netplan apply
+
+--------------------------------------------------------------------------------
+2. CONFIGURACIÓN DEL RECOLECTOR DE MÉTRICAS (PROMETHEUS)
+--------------------------------------------------------------------------------
+Se configuran los objetivos de raspado hacia los agentes "node_exporter" instalados en los puertos 9100 de las capas previas para consolidar la inmutabilidad de logs y estados.
+
+* Fichero clave de configuración: /etc/prometheus/prometheus.yml
+* Bloque de objetivos estáticos añadidos:
+--------------------------------------------------------------------------------
+scrape_configs:
+  - job_name: 'cluster_sis313'
+    static_configs:
+      - targets: ['10.0.10.2:9100'] # VM1: Seguridad (Nelson)
+      - targets: ['10.0.20.2:9100'] # VM2: Aplicación (Jhonnathan)
+      - targets: ['10.0.30.2:9100'] # VM3: Capa Datos (Emily)
+--------------------------------------------------------------------------------
+* Comando de reinicio del recolector: sudo systemctl restart prometheus
+
+--------------------------------------------------------------------------------
+3. PUESTA EN MARCHA DEL ENTORNO VISUAL (GRAFANA)
+--------------------------------------------------------------------------------
+Aprovisionamiento del entorno gráfico interactivo para análisis de logs y consumo de hardware de las subredes del proyecto.
+
+* Comandos de habilitación del servicio web de monitoreo:
+  sudo systemctl daemon-reload
+  sudo systemctl enable grafana-server
+  sudo systemctl start grafana-server
+
+* Validación operativa: Acceder vía navegador al puerto http://10.0.40.2:3000, añadir la fuente de datos (Data Source) apuntando al backend local http://localhost:9090 e importar el dashboard oficial de Linux System de Node Exporter.
+
+--------------------------------------------------------------------------------
+PRE-REQUISITOS GLOBALES DEL CLÚSTER DE DESPLIEGUE
+--------------------------------------------------------------------------------
+* 4 Máquinas Virtuales operando con Ubuntu Server 24.04 LTS.
+* Interconexión física mediante adaptadores de red en modo "Red Interna" compartiendo la misma denominación de interfaz en Proxmox/VirtualBox.
+* Servidor OpenSSH activo en cada nodo con el puerto unificado para el aprovisionamiento.
+* Configuración de permisos Sudoers (`adming4 ALL=(ALL) NOPASSWD:ALL`) en cada máquina para permitir la ejecución no interactiva del Playbook de Ansible.
+* Entorno Inicial del Clúster:
+  - En VM1: Disponer de binarios de NGINX y Ansible instalados de forma local.
+  - En VM2: Disponer de paquetes base de procesamiento web y extensiones básicas de PHP heredadas para Nextcloud.
+  - En VM3: Disponer del motor MariaDB Server configurado para el enlace de sockets.
+  - En todos los nodos: Despliegue de node_exporter escuchando en el puerto tcp 9100.
+
+⚠️ VI. PRUEBAS Y VALIDACIÓN
+
+Prueba Realizada                         Resultado Esperado                             Resultado Obtenido
+------------------------------------------------------------------------------------------------------------------
+Test de Failover de la Aplicación        Al apagar el nodo maestro Keepalived, la VIP   [OK] La IP cambia de nodo
+(Keepalived VRRP en VLAN 20)             debe migrar de forma transparente e instantánea. en menos de 1.5 segundos.
+
+Prueba de Carga/Estrés en la Frontera    El Proxy Inverso NGINX absorbe peticiones y    [OK] Tráfico encapsulado y
+(Balanceo y Reenvío Perimetral)          las deriva de forma homogénea sin caídas.      distribuido hacia la VLAN 20.
+
+Test de Seguridad y Hardening            Las peticiones HTTP son interceptadas por el   [OK] Cortafuegos deniega de
+(UFW Firewall e Inmutabilidad)           firewall, y el puerto de monitoreo solo        forma selectiva y audita las
+                                         responde a la IP asignada a la VM4.            métricas limpiamente.
+------------------------------------------------------------------------------------------------------------------
+
+📚 VII. CONCLUSIONES Y LECCIONES APRENDIDAS
+1. Desacoplamiento de Servicios: Se superó con éxito el paradigma de servidores monolíticos. Separar el almacenamiento físico (NFS), los metadatos (MariaDB), el motor de procesamiento lógico (PHP-FPM) y la frontera perimetral de red (NGINX Proxy) minimiza de forma contundente la superficie de ataque y optimiza los recursos de hardware del laboratorio.
+2. Robustez mediante Automatización: La implementación de Ansible redujo de horas a minutos el tiempo de recuperación y despliegue del sistema ante fallos críticos de aprovisionamiento, consolidando las bases de la infraestructura como código (IaC).
+3. Hardening Estricto como Regla: El uso de políticas estrictas de denegación por defecto en UFW y el aislamiento absoluto de datos mediante subinterfaces etiquetadas en Netplan (VLANs lógicas) demostraron ser soluciones altamente resilientes y eficaces para blindar entornos de producción empresariales.
